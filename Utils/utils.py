@@ -100,18 +100,79 @@ def get_correspondence(tl1, tl2, pts1, pts2):
 
     return new_tl1, new_tl2
 
-def warp_image(tl1, tl2, im1, im2):
+def get_grid(t1):
+    xmin, ymin = t1.min(0)
+    xmax, ymax = t1.max(0)
+    xv, yv = np.meshgrid(np.arange(xmin, xmax), np.arange(ymin, ymax))
+    coords = np.concatenate([xv.reshape(-1,1), yv.reshape(-1,1)], axis=1)
+    coords = np.concatenate([coords, np.ones((len(coords), 1))], axis=-1)
+    return coords
+
+def remove_invalid(coords):
+    c1 = set(np.where(coords[:,0] < 0)[0])
+    c1 = c1.union(set(np.where(coords[:,1] < 0)[0]))
+    c1 = c1.union(set(np.where(coords[:,2] < 0)[0]))
+    c1 = c1.union(set(np.where(coords[:,0] > 1)[0]))
+    c1 = c1.union(set(np.where(coords[:,1] > 1)[0]))
+    c1 = c1.union(set(np.where(coords[:,2] > 1)[0]))
     
-    im1_coords = get_grid(im1.shape)
-    im2_coords = get_grid(im2.shape)
+    coords = coords[~np.isin(np.arange(len(coords)), list(c1))]
+    if len(coords) == 0:
+        return coords, False, list(c1)
 
+    coords = coords.reshape(len(coords), -1)
+    return coords, True, list(c1)
+
+def bilinear_interpolate(img, coords):
+    int_coords = np.int32(coords)
+    x0, y0 = int_coords
+    dx, dy = coords - int_coords
+
+    # 4 Neighour pixels
+    q11 = img[y0, x0]
+    q21 = img[y0, x0 + 1]
+    q12 = img[y0 + 1, x0]
+    q22 = img[y0 + 1, x0 + 1]
+
+    btm = q21.T * dx + q11.T * (1 - dx)
+    top = q22.T * dx + q12.T * (1 - dx)
+    inter_pixel = top * dy + btm * (1 - dy)
+
+    return inter_pixel.T
+
+
+def warp_image(tl1, tl2, im1, im2):
+
+    result = im2.copy()
     for t1, t2 in zip(tl1, tl2):
-        mat_1 = get_matrix(t1)
-        mat_2 = get_matrix(t2)
+        print(t1,t2)
+        t1 = t1.reshape(-1, 2)
+        t2 = t2.reshape(-1, 2)
 
-        bary_coords_1 = np.linalg.inv(mat_1) @ im1_coords
+        coords1 = get_grid(t2)
 
-        mapped_coords = mat_2 @ bary_coords_1
+        mat_1 = np.concatenate([t1, np.ones((3,1))], axis=-1).T
+        mat_2 = np.concatenate([t2, np.ones((3,1))], axis=-1).T
+
+        try:
+            bary_coords_1 = (np.linalg.inv(mat_2) @ coords1.T).T
+        except:
+            print(mat_2)
+            continue
+
+        bary_coords_1, valid, ignore_idxs = remove_invalid(bary_coords_1)
+
+        if valid:
+            coords1 = coords1[~np.isin(np.arange(len(coords1)), list(ignore_idxs))]
+            mapped_coords = (mat_1 @ bary_coords_1.T)
+            x = coords1[:,0].astype(np.int32)
+            y = coords1[:,1].astype(np.int32)
+            result[y,x] = bilinear_interpolate(im1, mapped_coords[:2,:])
+        else:
+            print("Invalid")
+    
+    # cv2.imwrite("result.jpg", result)
+    return result
 
 
 

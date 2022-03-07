@@ -5,8 +5,14 @@ import cv2
 import argparse
 import os
 import glob
+import tqdm
 
 def swap_with_image(frames_dir, image_path):
+	
+	save_frames_dir = "viz/temp_warped/"
+	if not os.path.isdir(save_frames_dir):
+		os.makedirs(save_frames_dir)
+
 	frames = glob.glob(frames_dir + "/*.jpg")
 	img = cv2.imread(image_path)
 	img = cv2.resize(img, (480,640))
@@ -16,7 +22,8 @@ def swap_with_image(frames_dir, image_path):
 
 	triangleList1 = filter_triangles(triangleList1, img.shape)
 
-	for frame_path in frames:
+	for frame_path in tqdm.tqdm(frames):
+		frame_name = frame_path.split("/")[-1]
 		frame = cv2.imread(frame_path)
 		frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 		pts2, bbox2 = get_pts(frame_gray, 1)
@@ -32,10 +39,11 @@ def swap_with_image(frames_dir, image_path):
 		cv2.imwrite("check.jpg", c1)
 		cv2.imwrite("check1.jpg", c2)
 
-		import pdb;pdb.set_trace()
-
 		warped_image = warp_image(tl1, tl2, img, frame)
 
+		cv2.imwrite(f"{save_frames_dir}/{frame_name}", warped_image)
+
+	import pdb;pdb.set_trace()
 	
 
 def swap(frames_dir):
