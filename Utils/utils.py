@@ -3,6 +3,7 @@ import dlib
 from imutils import face_utils
 import numpy as np
 import os
+from scipy.spatial import distance
 
 p = "/Users/sonaal/Downloads/FaceSwap/Utils/shape_predictor_68_face_landmarks.dat"
 detector = dlib.get_frontal_face_detector()
@@ -80,25 +81,13 @@ def get_correspondence(tl1, tl2, pts1, pts2):
     m1 = {tuple(p) : i for i,p in enumerate(pts1)}
     m2 = {tuple(p) : i for i,p in enumerate(pts2)}
 
-    assert len(m1) == len(m2), "something is wrong"
+    idxs = np.array([m1[tuple(t)] for t in tl1_]).reshape(len(tl1),3)
 
-    inv_m1 = {v : k for k,v in m1.items()}
-    inv_m2 = {v : k for k,v in m2.items()}
-
-    tl1_m = np.array([m1[tuple(t)] for t in tl1_]).reshape(len(tl1),3)
-    tl2_m = np.array([m2[tuple(t)] for t in tl2_]).reshape(len(tl2),3)
-    
-    final_t = list()
-
-    for t in tl1_m:
-        if t in tl2_m:
-            final_t.append(t)
-    
-
-    new_tl1 = np.array([ [inv_m1[t] for t in tt] for tt in final_t]).reshape(len(final_t), 6)
-    new_tl2 = np.array([ [inv_m2[t] for t in tt] for tt in final_t]).reshape(len(final_t), 6)
+    new_tl1 = np.array([ [pts1[t] for t in tt] for tt in idxs]).reshape(len(idxs), 6)
+    new_tl2 = np.array([ [pts2[t] for t in tt] for tt in idxs]).reshape(len(idxs), 6)
 
     return new_tl1, new_tl2
+
 
 def get_grid(t1):
     xmin, ymin = t1.min(0)
@@ -145,7 +134,7 @@ def warp_image(tl1, tl2, im1, im2):
 
     result = im2.copy()
     for t1, t2 in zip(tl1, tl2):
-        print(t1,t2)
+        # print(t1,t2)
         t1 = t1.reshape(-1, 2)
         t2 = t2.reshape(-1, 2)
 
@@ -157,7 +146,7 @@ def warp_image(tl1, tl2, im1, im2):
         try:
             bary_coords_1 = (np.linalg.inv(mat_2) @ coords1.T).T
         except:
-            print(mat_2)
+            # print(mat_2)
             continue
 
         bary_coords_1, valid, ignore_idxs = remove_invalid(bary_coords_1)
@@ -168,12 +157,42 @@ def warp_image(tl1, tl2, im1, im2):
             x = coords1[:,0].astype(np.int32)
             y = coords1[:,1].astype(np.int32)
             result[y,x] = bilinear_interpolate(im1, mapped_coords[:2,:])
-        else:
-            print("Invalid")
+        # else:
+        #     print("Invalid")
     
-    # cv2.imwrite("result.jpg", result)
     return result
 
+'''
+Reference :  https://khanhha.github.io/posts/Thin-Plate-Splines-Warping/
+'''
+def warp_image_TSP(pts1, pts2, im1, im2):
+    H,W = im2.shape[:2]
+    result = im1.copy()
+    
+    K = distance.cdist(pts2, pts2, lambda u,v : np.sum((u-v)**2) * np.log(np.sum((u-v)**2) + 1e-8) )
+    P = np.concatenate([np.ones((len(pts2), 1)), pts2], axis=1)
+    zeros = np.zeros((3, 3))
+
+    top = np.concatenate([K, P], axis=1)
+    bot = np.concatenate([P.T, zeros], axis=1)
+    lamb = 1e-3
+
+    mat = np.concatenate([top, bot], axis=0) + lamb * np.eye(len(pts2)+3, len(pts2)+3)
+    mat_inv = np.linalg.inv(mat)
+
+    # x axis
+    v = np.concatenate([pts1[:,:1], np.zeros((3,1))], axis=0)
+    x_params = mat_inv @ v
+
+    #y axis
+    v = np.concatenate([pts1[:,1:2], np.zeros((3,1))], axis=0)
+    y_params = mat_inv @ v
+
+    
+    
+    import pdb;pdb.set_trace()
+
+    return result
 
 
 if __name__ == '__main__':
