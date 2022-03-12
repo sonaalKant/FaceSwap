@@ -146,7 +146,6 @@ def warp_image(tl1, tl2, im1, im2):
         try:
             bary_coords_1 = (np.linalg.inv(mat_2) @ coords1.T).T
         except:
-            # print(mat_2)
             continue
 
         bary_coords_1, valid, ignore_idxs = remove_invalid(bary_coords_1)
@@ -167,9 +166,12 @@ Reference :  https://khanhha.github.io/posts/Thin-Plate-Splines-Warping/
 '''
 def warp_image_TSP(pts1, pts2, im1, im2):
     H,W = im2.shape[:2]
-    result = im1.copy()
+    result = im2.copy()
     
-    K = distance.cdist(pts2, pts2, lambda u,v : np.sum((u-v)**2) * np.log(np.sum((u-v)**2) + 1e-8) )
+    # import pdb;pdb.set_trace()
+    # K1 = distance.cdist(pts2, pts2, lambda u,v : np.sum((u-v)**2) * np.log(np.sum((u-v)**2) + 1e-8) )
+    K = distance.cdist(pts2, pts2, 'sqeuclidean')
+    K = K*np.log(K + 1e-8)
     P = np.concatenate([np.ones((len(pts2), 1)), pts2], axis=1)
     zeros = np.zeros((3, 3))
 
@@ -188,10 +190,24 @@ def warp_image_TSP(pts1, pts2, im1, im2):
     v = np.concatenate([pts1[:,1:2], np.zeros((3,1))], axis=0)
     y_params = mat_inv @ v
 
-    
-    
-    import pdb;pdb.set_trace()
+    box = get_bbox(pts2)
+    coords = get_grid(np.array(box).reshape(2,2))
+    x = coords[:,0].astype(np.int32)
+    y = coords[:,1].astype(np.int32)
+    coords = np.roll(coords, 1)
 
+    #K = distance.cdist(coords[:,1:], pts2, lambda u,v : np.sum((u-v)**2) * np.log(np.sum((u-v)**2) + 1e-8) )
+    K = distance.cdist(coords[:,1:], pts2, 'sqeuclidean')
+    K = K*np.log(K + 1e-8)
+    M = np.concatenate([K,coords], axis=1)
+
+    xs = M @ x_params
+    ys = M @ y_params
+
+    mapped_coords = np.concatenate([xs, ys], axis=1)
+    
+    result[y,x] = bilinear_interpolate(im1, mapped_coords.T)
+    
     return result
 
 
