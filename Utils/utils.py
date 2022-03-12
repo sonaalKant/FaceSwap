@@ -38,8 +38,8 @@ def read_video(video_path):
     os.system(f"ffmpeg -i {video_path} -s 480x640 {path}/%04d.jpg")
     
 
-def save_video(frames_dir):
-    pass
+def save_video(frames_dir, save_path):
+    os.system(f"ffmpeg -framerate 24 -i {frames_dir}/%04d.jpg {save_path}")
 
 def get_bbox(pts):
     x1,y1 = pts.min(0)
@@ -132,7 +132,9 @@ def bilinear_interpolate(img, coords):
 
 def warp_image(tl1, tl2, im1, im2):
 
-    result = im2.copy()
+    result = np.zeros_like(im2)
+    mask = result.copy()
+
     for t1, t2 in zip(tl1, tl2):
         # print(t1,t2)
         t1 = t1.reshape(-1, 2)
@@ -156,17 +158,19 @@ def warp_image(tl1, tl2, im1, im2):
             x = coords1[:,0].astype(np.int32)
             y = coords1[:,1].astype(np.int32)
             result[y,x] = bilinear_interpolate(im1, mapped_coords[:2,:])
+            mask[y,x] = (255,255,255)
         # else:
         #     print("Invalid")
     
-    return result
+    return result, mask
 
 '''
 Reference :  https://khanhha.github.io/posts/Thin-Plate-Splines-Warping/
 '''
-def warp_image_TSP(pts1, pts2, im1, im2):
+def warp_image_TSP(pts1, pts2, im1, im2, tl1, tl2):
     H,W = im2.shape[:2]
-    result = im2.copy()
+    result = np.zeros_like(im2) #im2.copy()
+    mask = result.copy()
     
     # import pdb;pdb.set_trace()
     # K1 = distance.cdist(pts2, pts2, lambda u,v : np.sum((u-v)**2) * np.log(np.sum((u-v)**2) + 1e-8) )
@@ -177,7 +181,7 @@ def warp_image_TSP(pts1, pts2, im1, im2):
 
     top = np.concatenate([K, P], axis=1)
     bot = np.concatenate([P.T, zeros], axis=1)
-    lamb = 1e-3
+    lamb = 1e-5
 
     mat = np.concatenate([top, bot], axis=0) + lamb * np.eye(len(pts2)+3, len(pts2)+3)
     mat_inv = np.linalg.inv(mat)
@@ -190,25 +194,44 @@ def warp_image_TSP(pts1, pts2, im1, im2):
     v = np.concatenate([pts1[:,1:2], np.zeros((3,1))], axis=0)
     y_params = mat_inv @ v
 
-    box = get_bbox(pts2)
-    coords = get_grid(np.array(box).reshape(2,2))
-    x = coords[:,0].astype(np.int32)
-    y = coords[:,1].astype(np.int32)
-    coords = np.roll(coords, 1)
+    for t1, t2 in zip(tl1, tl2):
+        # print(t1,t2)
+        t1 = t1.reshape(-1, 2)
+        t2 = t2.reshape(-1, 2)
 
-    #K = distance.cdist(coords[:,1:], pts2, lambda u,v : np.sum((u-v)**2) * np.log(np.sum((u-v)**2) + 1e-8) )
-    K = distance.cdist(coords[:,1:], pts2, 'sqeuclidean')
-    K = K*np.log(K + 1e-8)
-    M = np.concatenate([K,coords], axis=1)
+        coords1 = get_grid(t2)
 
-    xs = M @ x_params
-    ys = M @ y_params
+        mat_1 = np.concatenate([t1, np.ones((3,1))], axis=-1).T
+        mat_2 = np.concatenate([t2, np.ones((3,1))], axis=-1).T
 
-    mapped_coords = np.concatenate([xs, ys], axis=1)
-    
-    result[y,x] = bilinear_interpolate(im1, mapped_coords.T)
-    
-    return result
+        try:
+            bary_coords_1 = (np.linalg.inv(mat_2) @ coords1.T).T
+        except:
+            continue
+
+        bary_coords_1, valid, ignore_idxs = remove_invalid(bary_coords_1)
+
+        if valid:
+            coords1 = coords1[~np.isin(np.arange(len(coords1)), list(ignore_idxs))]
+            x = coords1[:,0].astype(np.int32)
+            y = coords1[:,1].astype(np.int32)
+            coords1 = np.roll(coords1, 1)
+            K = distance.cdist(coords1[:,1:], pts2, 'sqeuclidean')
+            K = K*np.log(K + 1e-8)
+            M = np.concatenate([K,coords1], axis=1)
+
+            xs = M @ x_params
+            ys = M @ y_params
+
+            mapped_coords = np.concatenate([xs, ys], axis=1)
+            result[y,x] = bilinear_interpolate(im1, mapped_coords.T)
+            mask[y,x] = (255,255,255)
+        # else:
+        #     print("Invalid")
+
+    # cv2.imwrite("check.jpg", result)
+    # import pdb;pdb.set_trace()
+    return result, mask
 
 
 if __name__ == '__main__':
