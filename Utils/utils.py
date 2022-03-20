@@ -7,6 +7,7 @@ from scipy.spatial import distance
 
 p = "/Users/sonaal/Downloads/FaceSwap/Utils/shape_predictor_68_face_landmarks.dat"
 detector = dlib.get_frontal_face_detector()
+# detector = dlib.cnn_face_detection_model_v1("/Users/sonaal/Downloads/FaceSwap/Utils/mmod_human_face_detector.dat")
 predictor = dlib.shape_predictor(p)
 
 def visualize_pts(img, pts, color=(0,255,0)):
@@ -33,9 +34,60 @@ def visualize_bbox(img, bbox, color=(0,0,255)):
     cv2.rectangle(imgv, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
     return imgv
 
-def read_video(video_path):
+def ranges(nums):
+    nums = sorted(set(nums))
+    gaps = [[s, e] for s, e in zip(nums, nums[1:]) if s+1 < e]
+    edges = iter(nums[:1] + sum(gaps, []) + nums[-1:])
+    return list(zip(edges, edges))
+
+def interpolate(pts, missed_idxs):
+    missed_range = ranges(missed_idxs)
+    print(missed_range)
+    # import pdb;pdb.set_trace()
+    
+    for start, end in missed_range:
+
+        if start-1 < 0 or end + 1 >= len(pts) -1:
+            continue
+
+        p1 = pts[start-1] #if start-1 >= 0 else pts[end+1]
+        p2 = pts[end+1] #if end+1 <= len(pts)-1 else pts[start-1]
+        
+        dd = end - start + 2 # end - start + 1 + 1 (total gaps)
+        for j in range(start, end+1):
+            pts[j] = p1*(1- (j-start+1)/dd) + (j-start+1)/dd * p2
+            pts[j] = pts[j].astype(np.int32)
+
+    return pts  
+
+def get_complete_video_pts(frames, num_faces):
+
+    pts = list()
+    boxes = list()
+    missed_idxs = list()
+    for i, frame_path in  enumerate(sorted(frames)):
+        frame = cv2.imread(frame_path)
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        p, b = get_pts(frame_gray, num_faces)
+        if len(p) < num_faces:
+            # print(i)
+            missed_idxs.append(i)
+            p = []
+            b = []
+        pts.append(p) 
+        boxes.append(b)
+
+    pts = interpolate(pts, missed_idxs)
+    boxes = interpolate(boxes, missed_idxs)
+
+    return pts, boxes
+
+def read_video(video_path, resize=False):
     path = "/Users/sonaal/Downloads/FaceSwap/viz/temp"
-    os.system(f"ffmpeg -i {video_path} -s 480x640 {path}/%04d.jpg")
+    if resize:
+        os.system(f"ffmpeg -i {video_path} -s 480x640 {path}/%04d.jpg")
+    else:
+        os.system(f"ffmpeg -i {video_path} {path}/%04d.jpg")
     
 
 def save_video(frames_dir, save_path):
@@ -47,7 +99,8 @@ def get_bbox(pts):
     return [x1,y1,x2,y2]
 
 def get_pts(gray, num_faces):
-    rects = detector(gray, 0)
+    # import pdb;pdb.set_trace()
+    rects = detector(gray, 1)
     shape = [predictor(gray, bbox) for bbox in rects]
     pts = np.array([face_utils.shape_to_np(s) for s in shape])
     # bbox = np.array([face_utils.rect_to_bb(rect) for rect in rects])
@@ -104,6 +157,7 @@ def remove_invalid(coords):
     c1 = c1.union(set(np.where(coords[:,0] > 1)[0]))
     c1 = c1.union(set(np.where(coords[:,1] > 1)[0]))
     c1 = c1.union(set(np.where(coords[:,2] > 1)[0]))
+    # c1 = c1.union(set(np.where(np.sum(coords, axis=1) > 1)[0]))
     
     coords = coords[~np.isin(np.arange(len(coords)), list(c1))]
     if len(coords) == 0:
@@ -157,7 +211,10 @@ def warp_image(tl1, tl2, im1, im2):
             mapped_coords = (mat_1 @ bary_coords_1.T)
             x = coords1[:,0].astype(np.int32)
             y = coords1[:,1].astype(np.int32)
-            result[y,x] = bilinear_interpolate(im1, mapped_coords[:2,:])
+            try:
+                result[y,x] = bilinear_interpolate(im1, mapped_coords[:2,:])
+            except:
+                continue
             mask[y,x] = (255,255,255)
         # else:
         #     print("Invalid")
@@ -224,7 +281,10 @@ def warp_image_TSP(pts1, pts2, im1, im2, tl1, tl2):
             ys = M @ y_params
 
             mapped_coords = np.concatenate([xs, ys], axis=1)
-            result[y,x] = bilinear_interpolate(im1, mapped_coords.T)
+            try:
+                result[y,x] = bilinear_interpolate(im1, mapped_coords.T)
+            except:
+                continue
             mask[y,x] = (255,255,255)
         # else:
         #     print("Invalid")
@@ -235,7 +295,7 @@ def warp_image_TSP(pts1, pts2, im1, im2, tl1, tl2):
 
 
 if __name__ == '__main__':
-    img = cv2.imread("/Users/sonaal/Downloads/FaceSwap/Data/noah-centineo-1.jpg")
+    img = cv2.imread("/Users/sonaal/Downloads/FaceSwap/Data/Scarlett.jpg")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     pts, bbox = get_pts(gray, 1)
     T = get_triangles(pts[0], bbox[0])
@@ -244,7 +304,7 @@ if __name__ == '__main__':
     imgv = visualize_pts(imgv, pts[0])
     imgv = visualize_triangles(imgv, T)
 
-    cv2.imwrite("check.jpg", imgv)
+    cv2.imwrite("scarlett_pts.jpg", imgv)
 
 
 
